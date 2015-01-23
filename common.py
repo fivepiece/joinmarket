@@ -53,6 +53,8 @@ def debug_dump_object(obj, skip_fields=[]):
 		else:
 			print v
 
+class OutOfFundsError(Exception):
+	pass
 
 class Wallet(object):
 	def __init__(self, seed, max_mix_depth=2):
@@ -131,10 +133,17 @@ class Wallet(object):
 			if mixdepth not in mix_utxo_list:
 				mix_utxo_list[mixdepth] = []
 			mix_utxo_list[mixdepth].append(utxo)
+		if not mix_utxo_list:
+			debug("WARNING: There are no utxos. We have no coins!")
 		return mix_utxo_list
 
 	def select_utxos(self, mixdepth, amount):
-		utxo_list = self.get_mix_utxo_list()[mixdepth]
+		try:
+			utxo_list = self.get_mix_utxo_list()[mixdepth]
+		except KeyError:
+			debug("Failed to choose any utxos, no coins at mixdepth: "\
+			      +str(mixdepth) + "\nDid you forget to fund your wallet?")
+			return None
 		unspent = [{'utxo': utxo, 'value': self.unspent[utxo]['value']}
 			for utxo in utxo_list]
 		inputs = btc.select(unspent, amount)
@@ -144,7 +153,10 @@ class Wallet(object):
 
 	def sync_wallet(self, gaplimit=6):
 		debug('synchronizing wallet')
-		self.download_wallet_history(gaplimit)
+		if self.download_wallet_history(gaplimit):
+			raise OutOfFundsError("""There are no coins in this wallet. 
+			Please fund one of the addresses in the wallet defined by this seed, 
+			by first running wallet-tool.py and choosing a receiving address.""")
 		self.find_unspent_addresses()
 		self.print_debug_wallet_info()
 
@@ -153,7 +165,7 @@ class Wallet(object):
 		sets Wallet internal indexes to be at the next unused address
 		'''
 		addr_req_count = 20
-
+		no_funds = True
 		for mix_depth in range(self.max_mix_depth):
 			for forchange in [0, 1]:
 				unused_addr_count = 0
@@ -171,6 +183,7 @@ class Wallet(object):
 					data = json.loads(res)['data']
 					for dat in data:
 						if dat['nb_txs'] != 0:
+							no_funds = False
 							last_used_addr = dat['address']
 						else:
 							unused_addr_count += 1
@@ -180,6 +193,7 @@ class Wallet(object):
 					self.index[mix_depth][forchange] = 0
 				else:
 					self.index[mix_depth][forchange] = self.addr_cache[last_used_addr][2] + 1
+		return no_funds
 
 	def find_unspent_addresses(self):
 		'''
