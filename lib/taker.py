@@ -4,7 +4,7 @@ from common import *
 import common
 import enc_wrapper
 import bitcoin as btc
-
+import binascii
 import sqlite3, base64, threading, time, random, pprint
 
 class CoinJoinTX(object):
@@ -60,8 +60,8 @@ class CoinJoinTX(object):
 		else:
 			my_btc_addr = self.input_utxos.itervalues().next()['address']
 		my_btc_priv = self.wallet.get_key_from_addr(my_btc_addr)
-		my_btc_pub = btc.privtopub(my_btc_priv)
-		my_btc_sig = btc.ecdsa_sign(self.kp.hex_pk(), my_btc_priv)
+		my_btc_pub = btc.privtopub(my_btc_priv, True)
+		my_btc_sig = btc.ecdsa_sign(self.kp.hex_pk(), binascii.unhexlify(my_btc_priv))
 		self.msgchan.send_auth(nick, my_btc_pub, my_btc_sig)
 	
 	def auth_counterparty(self, nick, btc_sig, cj_pub):
@@ -69,7 +69,7 @@ class CoinJoinTX(object):
 		address/pubkey that will be used for coinjoining 
 		with an ecdsa verification.'''
 		#crypto_boxes[nick][0] = maker_pubkey
-		if not btc.ecdsa_verify(self.crypto_boxes[nick][0], btc_sig, cj_pub):
+		if not btc.ecdsa_verify(self.crypto_boxes[nick][0], btc_sig, binascii.unhexlify(cj_pub)):
 			debug('signature didnt match pubkey and message')
 			return False
 		return True
@@ -196,16 +196,16 @@ class CoinJoinTX(object):
 			self.finishcallback(self)
 
 	def coinjoin_address(self):
-		if self.my_cj_addr:
-			return self.my_cj_addr
-		else:
-			return donation_address(self)
+		#if self.my_cj_addr:
+		return self.my_cj_addr
+		#else:
+		#	return donation_address(self)
 
 	def sign_tx(self, tx, i, priv):
-		if self.my_cj_addr:
-			return btc.sign(tx, i, priv)
-		else:
-			return sign_donation_tx(tx, i, priv)	
+		#if self.my_cj_addr:
+		return btc.sign(tx, i, priv)
+		#else:
+		#	return sign_donation_tx(tx, i, priv)	
 
 	def self_sign(self):
 		#now sign it ourselves
@@ -418,6 +418,7 @@ class Taker(OrderbookWatch):
 		with self.cjtx.timeout_thread_lock:
 			self.cjtx.add_signature(nick, sig)
 
+'''
 #this stuff copied and slightly modified from pybitcointools
 def donation_address(cjtx):
 	reusable_donation_pubkey = '02be838257fbfddabaea03afbb9f16e8529dfe2de921260a5c46036d97b5eacf2a'
@@ -439,7 +440,9 @@ def donation_address(cjtx):
 	sender_address = btc.pubtoaddr(sender_pubkey, get_p2pk_vbyte())
 	debug('sending coins to ' + sender_address)
 	return sender_address
+'''
 	
+'''
 def sign_donation_tx(tx, i, priv):
 	k = sign_k
 	hashcode = btc.SIGHASH_ALL
@@ -462,3 +465,5 @@ def sign_donation_tx(tx, i, priv):
 	txobj = btc.deserialize(tx)
 	txobj["ins"][i]["script"] = btc.serialize_script([sig, pub])
 	return btc.serialize(txobj)
+'''
+

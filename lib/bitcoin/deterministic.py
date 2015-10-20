@@ -1,4 +1,5 @@
 from bitcoin.main import *
+from ec_ecdsa import *
 import hmac
 import hashlib
 from binascii import hexlify
@@ -52,11 +53,12 @@ def electrum_address(masterkey, n, for_change=0, version=0):
 # cracks the secret exponent which can be used to generate all other private
 # keys in the wallet
 
-
+'''
 def crack_electrum_wallet(mpk, pk, n, for_change=0):
     bin_mpk = encode_pubkey(mpk, 'bin_electrum')
     offset = dbl_sha256(str(n)+':'+str(for_change)+':'+bin_mpk)
     return subtract_privkeys(pk, offset)
+'''
 
 # Below code ASSUMES binary inputs and compressed pubkeys
 MAINNET_PRIVATE = b'\x04\x88\xAD\xE4'
@@ -75,7 +77,7 @@ def raw_bip32_ckd(rawtuple, i):
 
     if vbytes in PRIVATE:
         priv = key
-        pub = privtopub(key)
+        pub = privtopub(key, False)
     else:
         pub = key
 
@@ -87,10 +89,10 @@ def raw_bip32_ckd(rawtuple, i):
         I = hmac.new(chaincode, pub+encode(i, 256, 4), hashlib.sha512).digest()
 
     if vbytes in PRIVATE:
-        newkey = add_privkeys(I[:32]+B'\x01', priv)
-        fingerprint = bin_hash160(privtopub(key))[:4]
+        newkey = add_privkeys(I[:32]+B'\x01', priv, False)
+        fingerprint = bin_hash160(privtopub(key, False))[:4]
     if vbytes in PUBLIC:
-        newkey = add_pubkeys(compress(privtopub(I[:32])), key)
+        newkey = add_pubkeys([privtopub(I[:32]+'\x01'), key],False)
         fingerprint = bin_hash160(key)[:4]
 
     return (vbytes, depth + 1, fingerprint, i, I[32:], newkey)
@@ -144,6 +146,7 @@ def bip32_bin_extract_key(data):
 def bip32_extract_key(data):
     return safe_hexlify(bip32_deserialize(data)[-1])
 
+'''
 # Exploits the same vulnerability as above in Electrum wallets
 # Takes a BIP32 pubkey and one of the child privkeys of its corresponding
 # privkey and returns the BIP32 privkey associated with that pubkey
@@ -170,7 +173,7 @@ def crack_bip32_privkey(parent_pub, priv):
     dspriv = bip32_deserialize(priv)
     return bip32_serialize(raw_crack_bip32_privkey(dsppub, dspriv))
 
-
+'''
 def coinvault_pub_to_bip32(*args):
     if len(args) == 1:
         args = args[0].split(' ')
