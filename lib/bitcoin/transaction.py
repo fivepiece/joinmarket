@@ -5,8 +5,6 @@ from ec_ecdsa import *
 from _functools import reduce
 import secp256k1
 import os
-### Hex to bin converter and vice versa for objects
-fpref = binascii.hexlify(os.urandom(4))
 
 def json_is_base(obj, base):
     if not is_python2 and isinstance(obj, bytes):
