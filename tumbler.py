@@ -261,7 +261,7 @@ def main():
 		+ 'coins being left in higher mixing levels, this option can be used to resume without needing'
 		+ ' to send to another address. default=0', default=0)
 	parser.add_option('-f', '--txfee', type='int', dest='txfee',
-		default=10000, help='miner fee contribution, in satoshis, default=10000')
+		default=10000, help='total miner fee in satoshis, default=10000')
 	parser.add_option('-a', '--addrcount', type='int', dest='addrcount',
 		default=3, help='How many destination addresses in total should be used. If not enough are given'
 			' as command line arguments, the script will ask for more. This parameter is required'
@@ -318,6 +318,9 @@ def main():
 	if options.addrcount+1 > options.mixdepthcount:
 		print 'not enough mixing depths to pay to all destination addresses, increasing mixdepthcount'
 		options.mixdepthcount = options.addrcount+1
+	if options.donateamount > 10.0:
+		#fat finger probably, or misunderstanding
+		options.donateamount = 0.9
 
 	print str(options)
 	tx_list = generate_tumbler_tx(destaddrs, options)

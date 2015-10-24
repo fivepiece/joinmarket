@@ -4,13 +4,13 @@ from decimal import Decimal, InvalidOperation
 from math import factorial, exp
 import sys, datetime, json, time, pprint, threading, getpass
 import random
-import blockchaininterface, slowaes
+import blockchaininterface, jsonrpc, slowaes
 from ConfigParser import SafeConfigParser, NoSectionError, NoOptionError
 import os, io, itertools
 
 JM_VERSION = 2
 nickname = ''
-DUST_THRESHOLD = 546
+DUST_THRESHOLD = 2730
 bc_interface = None
 ordername_list = ["absorder", "relorder"]
 maker_timeout_sec = 30
@@ -55,7 +55,10 @@ socks5_port = 9050
 maker_timeout_sec = 30
 
 [POLICY]
-#for dust sweeping, try merge_algorithm = gradual
+# for dust sweeping, try merge_algorithm = gradual
+# for more rapid dust sweeping, try merge_algorithm = greedy
+# for most rapid dust sweeping, try merge_algorithm = greediest
+# but don't forget to bump your miner fees!
 merge_algorithm = default
 """
 
@@ -211,7 +214,31 @@ def select_gradual(unspent, value):
 
 def select_greedy(unspent, value):
 	'''
-	UTXO selection algorithm for rapid dust reduction
+	UTXO selection algorithm for greedy dust reduction, but leaves out
+	extraneous utxos, preferring to keep multiple small ones.
+	'''
+	value, key, cursor = int(value), lambda u: u['value'], 0
+	utxos, picked = sorted(unspent, key = key), []
+	for utxo in utxos:      # find the smallest consecutive sum >= value
+		value -= key(utxo)
+		if value == 0:  # perfect match! (skip dilution stage)
+			return utxos[0:cursor+1] # end is non-inclusive
+                elif value < 0: # overshot
+			picked += [utxo] # definitely need this utxo
+			break            # proceed to dilution
+		cursor += 1
+	for utxo in utxos[cursor-1::-1]: # dilution loop
+		value += key(utxo) # see if we can skip this one
+		if value > 0:      # no, that drops us below the target
+			picked += [utxo] # so we need this one too
+			value -= key(utxo) # 'backtrack' the counter
+	if len(picked) > 0:
+		return picked
+	raise Exception('Not enough funds') # if all else fails, we do too
+
+def select_greediest(unspent, value):
+	'''
+	UTXO selection algorithm for speediest dust reduction
 	Combines the shortest run of utxos (sorted by size, from smallest) which
 	exceeds the target value; if the target value is larger than the sum of
 	all smaller utxos, uses the smallest utxo larger than the target value.
@@ -244,6 +271,8 @@ class AbstractWallet(object):
 				self.utxo_selector = select_gradual
 			elif config.get("POLICY", "merge_algorithm") == "greedy":
 				self.utxo_selector = select_greedy
+			elif config.get("POLICY", "merge_algorithm") == "greediest":
+				self.utxo_selector = select_greediest
 			elif config.get("POLICY", "merge_algorithm") != "default":
 				raise Exception("Unknown merge algorithm")
 		except NoSectionError:
@@ -281,10 +310,17 @@ class AbstractWallet(object):
 		return mix_balance
 
 class Wallet(AbstractWallet):
-	def __init__(self, seedarg, max_mix_depth, gaplimit=6, extend_mixdepth=False):
+	def __init__(self, seedarg, max_mix_depth=2, gaplimit=6, extend_mixdepth=False, storepassword=False):
 		super(Wallet, self).__init__()
 		self.max_mix_depth = max_mix_depth
-		self.seed = self.get_seed(seedarg)
+		self.storepassword = storepassword
+		#key is address, value is (mixdepth, forchange, index)
+		#if mixdepth = -1 it's an imported key and index refers to imported_privkeys
+		self.addr_cache = {}
+		self.unspent = {}
+		self.spent_utxos = []
+		self.imported_privkeys = {}
+		self.seed = self.read_wallet_file_data(seedarg)
 		if extend_mixdepth and len(self.index_cache) > max_mix_depth:
 			self.max_mix_depth = len(self.index_cache)
 		self.gaplimit = gaplimit
@@ -298,25 +334,16 @@ class Wallet(AbstractWallet):
 		for i in range(self.max_mix_depth):
 			self.index.append([0, 0])
 
-		#example
-		#index = self.index[mixing_depth]
-		#key = btc.bip32_ckd(self.keys[mixing_depth][index[0]], index[1])
-
-		self.addr_cache = {}
-		self.unspent = {}
-		self.spent_utxos = []
-
-	def get_seed(self, seedarg):
+	def read_wallet_file_data(self, filename):
 		self.path = None
 		self.index_cache = [[0, 0]]*self.max_mix_depth
-		path = os.path.join('wallets', seedarg)
+		path = os.path.join('wallets', filename)
 		if not os.path.isfile(path):
 			if get_network() == 'testnet':
-				debug('seedarg interpreted as seed, only available in testnet because this probably has lower entropy')
-				return seedarg
+				debug('filename interpreted as seed, only available in testnet because this probably has lower entropy')
+				return filename
 			else:
 				raise IOError('wallet file not found')
-		#debug('seedarg interpreted as wallet file name')
 		self.path = path
 		fd = open(path, 'r')
 		walletfile = fd.read()
@@ -345,6 +372,19 @@ class Wallet(AbstractWallet):
 			except ValueError:
 				print 'Incorrect password'
 				decrypted = False
+		if self.storepassword:
+			self.password_key = password_key
+			self.walletdata = walletdata
+		if 'imported_keys' in walletdata:
+			for epk_m in walletdata['imported_keys']:
+				privkey = slowaes.decryptData(password_key, epk_m['encrypted_privkey']
+					.decode('hex')).encode('hex')
+				privkey = btc.encode_privkey(privkey, 'hex_compressed')
+				if epk_m['mixdepth'] not in self.imported_privkeys:
+					self.imported_privkeys[epk_m['mixdepth']] = []
+				self.addr_cache[btc.privtoaddr(privkey, get_p2pk_vbyte())] = (epk_m['mixdepth'],
+					-1, len(self.imported_privkeys[epk_m['mixdepth']]))
+				self.imported_privkeys[epk_m['mixdepth']].append(privkey)
 		return decrypted_seed
 
 	def update_cache_index(self):
@@ -388,10 +428,13 @@ class Wallet(AbstractWallet):
 		return self.get_new_addr(mixing_depth, True)
 
 	def get_key_from_addr(self, addr):
-		if addr in self.addr_cache:
-			return self.get_key(*self.addr_cache[addr])
-		else:
+		if addr not in self.addr_cache:
 			return None
+		ac = self.addr_cache[addr]
+		if ac[1] >= 0:
+			return self.get_key(*ac)
+		else:
+			return self.imported_privkeys[ac[0]][ac[2]]
 
 	def remove_old_utxos(self, tx):
 		removed_utxos = {}
@@ -442,6 +485,7 @@ class BitcoinCoreWallet(AbstractWallet):
 		self.max_mix_depth = 1
 
 	def get_key_from_addr(self, addr):
+		self.ensure_wallet_unlocked()
 		return bc_interface.rpc('dumpprivkey', [addr])
 
 	def get_utxos_by_mixdepth(self):
@@ -458,6 +502,22 @@ class BitcoinCoreWallet(AbstractWallet):
 
 	def get_change_addr(self, mixing_depth):
 		return bc_interface.rpc('getrawchangeaddress', [])
+
+	def ensure_wallet_unlocked(self):
+		wallet_info = bc_interface.rpc('getwalletinfo', [])
+		if 'unlocked_until' in wallet_info and wallet_info['unlocked_until'] <= 0:
+			while True:
+				password = getpass.getpass('Enter passphrase to unlock wallet: ')
+				if password == '':
+					raise RuntimeError('Aborting wallet unlock')
+				try:
+					#TODO cleanly unlock wallet after use, not with arbitrary timeout
+					bc_interface.rpc('walletpassphrase', [password, 10])
+					break
+				except jsonrpc.JsonRpcError as exc:
+					if exc.code != -14:
+						raise exc
+					# Wrong passphrase, try again.
 
 def calc_cj_fee(ordertype, cjfee, cj_amount):
 	real_cjfee = None
@@ -532,7 +592,7 @@ def choose_orders(db, cj_amount, n, chooseOrdersBy, ignored_makers=[]):
 	orders = [(o['counterparty'], o['oid'],	calc_cj_fee(o['ordertype'], o['cjfee'], cj_amount), o['txfee'])
 		for o in sqlorders if cj_amount >= o['minsize'] and cj_amount <= o['maxsize'] and o['counterparty']
 		not in ignored_makers]
-	feekey = lambda o: o[2] # function that returns the fee for a given order
+	feekey = lambda o: o[2] - o[3] # function that returns the fee for a given order
 	counterparties = set([o[0] for o in orders])
 	if n > len(counterparties):
 		debug('ERROR not enough liquidity in the orderbook n=%d suitable-counterparties=%d amount=%d totalorders=%d'
@@ -558,28 +618,31 @@ def choose_orders(db, cj_amount, n, chooseOrdersBy, ignored_makers=[]):
 	chosen_orders = [o[:2] for o in chosen_orders]
 	return dict(chosen_orders), total_cj_fee
 
-def choose_sweep_orders(db, total_input_value, my_tx_fee, n, chooseOrdersBy, ignored_makers=[]):
+def choose_sweep_orders(db, total_input_value, total_txfee, n, chooseOrdersBy, ignored_makers=[]):
 	'''
 	choose an order given that we want to be left with no change
 	i.e. sweep an entire group of utxos
 
 	solve for cjamount when mychange = 0
 	for an order with many makers, a mixture of absorder and relorder
-	mychange = totalin - cjamount - mytxfee - sum(absfee) - sum(relfee*cjamount)
+	mychange = totalin - cjamount - total_txfee - sum(absfee) - sum(relfee*cjamount)
 	=> 0 = totalin - mytxfee - sum(absfee) - cjamount*(1 + sum(relfee))
 	=> cjamount = (totalin - mytxfee - sum(absfee)) / (1 + sum(relfee))
 	'''
 	def calc_zero_change_cj_amount(ordercombo):
 		sumabsfee = 0
 		sumrelfee = Decimal('0')
+		sumtxfee_contribution = 0
 		for order in ordercombo:
+			sumtxfee_contribution += order[0]['txfee']
 			if order[0]['ordertype'] == 'absorder':
 				sumabsfee += int(order[0]['cjfee'])
 			elif order[0]['ordertype'] == 'relorder':
 				sumrelfee += Decimal(order[0]['cjfee'])
 			else:
 				raise RuntimeError('unknown order type: ' + str(order[0]['ordertype']))
-		cjamount = (total_input_value - my_tx_fee - sumabsfee) / (1 + sumrelfee)
+		my_txfee = max(total_txfee - sumtxfee_contribution, 0)
+		cjamount = (total_input_value - my_txfee - sumabsfee) / (1 + sumrelfee)
 		cjamount = int(cjamount.quantize(Decimal(1)))
 		return cjamount, int(sumabsfee + sumrelfee*cjamount)
 
@@ -592,9 +655,9 @@ def choose_sweep_orders(db, total_input_value, my_tx_fee, n, chooseOrdersBy, ign
 	debug('orderlist = \n' + '\n'.join([str(o) for o in orderlist]))
 
 	#choose N amount of orders
-	available_orders = [(o, calc_cj_fee(o['ordertype'], o['cjfee'], total_input_value))
+	available_orders = [(o, calc_cj_fee(o['ordertype'], o['cjfee'], total_input_value), o['txfee'])
 		for o in orderlist]
-	feekey = lambda o: o[1] # function that returns the fee for a given order
+	feekey = lambda o: o[1] - o[2]# function that returns the fee for a given order
 	available_orders = sorted(available_orders, key=feekey) #sort from smallest to biggest cj fee
 	chosen_orders = []
 	while len(chosen_orders) < n:

@@ -43,6 +43,11 @@ class CliJsonRpc(object):
 	except ValueError:
 	    return res.strip()
 
+def is_index_ahead_of_cache(wallet, mix_depth, forchange):
+	if mix_depth >= len(wallet.index_cache):
+		return True
+	return wallet.index[mix_depth][forchange] >= wallet.index_cache[mix_depth][forchange]
+
 def get_blockchain_interface_instance(config):
 	source = config.get("BLOCKCHAIN", "blockchain_source")
 	network = common.get_network()
@@ -125,13 +130,12 @@ class BlockrInterface(BlockchainInterface):
 			for forchange in [0, 1]:
 				unused_addr_count = 0
 				last_used_addr = ''
-				while unused_addr_count < wallet.gaplimit or\
-						wallet.index[mix_depth][forchange] <= wallet.index_cache[mix_depth][forchange]:
+				while unused_addr_count < wallet.gaplimit or not is_index_ahead_of_cache(wallet, mix_depth, forchange):
 					addrs = [wallet.get_new_addr(mix_depth, forchange) for i in range(self.BLOCKR_MAX_ADDR_REQ_COUNT)]
 
 					#TODO send a pull request to pybitcointools
 					# because this surely should be possible with a function from it
-					blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/address/txs/'
+					blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/address/txs/'
 					#print 'downloading, lastusedaddr = ' + last_used_addr + ' unusedaddrcount= ' + str(unused_addr_count)
 					res = btc.make_request(blockr_url+','.join(addrs))
 					data = json.loads(res)['data']
@@ -171,7 +175,7 @@ class BlockrInterface(BlockchainInterface):
 			# unspent() doesnt tell you which address, you get a bunch of utxos
 			# but dont know which privkey to sign with
 			
-			blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/address/unspent/'
+			blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/address/unspent/'
 			res = btc.make_request(blockr_url+','.join(req))
 			data = json.loads(res)['data']
 			if 'unspent' in data:
@@ -213,7 +217,7 @@ class BlockrInterface(BlockchainInterface):
 					if int(time.time()) - st > unconfirm_timeout:
 						common.debug('checking for unconfirmed tx timed out')
 						return
-					blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/address/unspent/'
+					blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/address/unspent/'
 					random.shuffle(self.output_addresses) #seriously weird bug with blockr.io
 					data = json.loads(btc.make_request(blockr_url + ','.join(self.output_addresses) + '?unconfirmed=1'))['data']
 					shared_txid = None
@@ -227,7 +231,7 @@ class BlockrInterface(BlockchainInterface):
 					if len(shared_txid) == 0:
 						continue
 					time.sleep(2) #here for some race condition bullshit with blockr.io
-					blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/tx/raw/'
+					blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/tx/raw/'
 					data = json.loads(btc.make_request(blockr_url + ','.join(shared_txid)))['data']
 					if not isinstance(data, list):
 						data = [data]
@@ -250,7 +254,7 @@ class BlockrInterface(BlockchainInterface):
 					if int(time.time()) - st > confirm_timeout:
 						common.debug('checking for confirmed tx timed out')
 						return
-					blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/address/txs/'
+					blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/address/txs/'
 					data = json.loads(btc.make_request(blockr_url + ','.join(self.output_addresses)))['data']
 					shared_txid = None
 					for addrtxs in data:
@@ -262,7 +266,7 @@ class BlockrInterface(BlockchainInterface):
 					common.debug('sharedtxid = ' + str(shared_txid))
 					if len(shared_txid) == 0:
 						continue
-					blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/tx/raw/'
+					blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/tx/raw/'
 					data = json.loads(btc.make_request(blockr_url + ','.join(shared_txid)))['data']
 					if not isinstance(data, list):
 						data = [data]
@@ -302,7 +306,7 @@ class BlockrInterface(BlockchainInterface):
 			txids = [txids]
 		data = []
 		for ids in txids:
-			blockr_url = 'http://' + self.blockr_domain + '.blockr.io/api/v1/tx/info/'
+			blockr_url = 'https://' + self.blockr_domain + '.blockr.io/api/v1/tx/info/'
 			blockr_data = json.loads(btc.make_request(blockr_url + ','.join(ids)))['data']
 			if not isinstance(blockr_data, list):
 				blockr_data = [blockr_data]
@@ -428,7 +432,7 @@ class BitcoinCoreInterface(BlockchainInterface):
 		return 'joinmarket-wallet-' + btc.dbl_sha256(wallet.keys[0][0])[:6]
 
 	def rpc(self, method, args):
-		if method != 'importaddress':
+		if method not in ['importaddress', 'walletpassphrase']:
 			common.debug('rpc: ' + method + " " + str(args))
 		res = self.jsonRpc.call(method, args)
 		if isinstance(res, unicode):
@@ -449,12 +453,18 @@ class BitcoinCoreInterface(BlockchainInterface):
 			return
 		common.debug('requesting wallet history')
 		wallet_name = self.get_wallet_name(wallet)
-		addr_req_count = 81
+		addr_req_count = 20
 		wallet_addr_list = []
 		for mix_depth in range(wallet.max_mix_depth):
 			for forchange in [0, 1]:
 				wallet_addr_list += [wallet.get_new_addr(mix_depth, forchange) for i in range(addr_req_count)]
 				wallet.index[mix_depth][forchange] = 0
+		#makes more sense to add these in an account called "joinmarket-imported" but its much
+		# simpler to add to the same account here
+		for privkey_list in wallet.imported_privkeys.values():
+			for privkey in privkey_list:
+				imported_addr = btc.privtoaddr(privkey, common.get_p2pk_vbyte())
+				wallet_addr_list.append(imported_addr)
 		imported_addr_list = self.rpc('getaddressesbyaccount', [wallet_name])
 		if not set(wallet_addr_list).issubset(set(imported_addr_list)):
 			self.add_watchonly_addresses(wallet_addr_list, wallet_name)
@@ -467,6 +477,9 @@ class BitcoinCoreInterface(BlockchainInterface):
 			buf = self.rpc('listtransactions', [wallet_name, 1000,
 					len(txs), True])
 			txs += buf
+		#TODO check whether used_addr_list can be a set, may be faster (if its a hashset) and allows 
+		# using issubset() here and setdiff() for finding which addresses need importing
+		#TODO also check the fastest way to build up python lists, i suspect using += is slow
 		used_addr_list = [tx['address'] for tx in txs if tx['category'] == 'receive']
 		too_few_addr_mix_change = []
 		for mix_depth in range(wallet.max_mix_depth):
@@ -476,7 +489,7 @@ class BitcoinCoreInterface(BlockchainInterface):
 				breakloop = False
 				while not breakloop:
 					if unused_addr_count >= wallet.gaplimit and\
-							wallet.index[mix_depth][forchange] >= wallet.index_cache[mix_depth][forchange]:
+							is_index_ahead_of_cache(wallet, mix_depth, forchange):
 						break
 					mix_change_addrs = [wallet.get_new_addr(mix_depth, forchange) for i in range(addr_req_count)]
 					for mc_addr in mix_change_addrs:
@@ -502,6 +515,7 @@ class BitcoinCoreInterface(BlockchainInterface):
 				wallet_addr_list += [wallet.get_new_addr(mix_depth, forchange) for i in range(addr_req_count*3)]
 			self.add_watchonly_addresses(wallet_addr_list, wallet_name)
 			return
+
 		self.wallet_synced = True
 
 	def sync_unspent(self, wallet):
