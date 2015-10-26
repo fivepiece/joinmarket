@@ -117,7 +117,6 @@ def hex_to_b58check(inp, magicbyte=0):
 def b58check_to_hex(inp):
     return safe_hexlify(b58check_to_bin(inp))
 
-#pubkey must be passed in in binary not hex
 def pubkey_to_address(pubkey, magicbyte=0):
     if len(pubkey) in [66, 130]:
         return bin_to_b58check(
@@ -137,5 +136,4 @@ def ecdsa_verify(msg, sig, pub):
     #See note to ecdsa_sign
     hashed_msg = electrum_sig_hash(msg)
     return ecdsa_raw_verify(hashed_msg, pub, base64.b64decode(sig), False,rawmsg=True)
-
 

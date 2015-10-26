@@ -159,13 +159,11 @@ def txhash(tx, hashcode=None):
 def bin_txhash(tx, hashcode=None):
     return binascii.unhexlify(txhash(tx, hashcode))
 
-def ecdsa_tx_sign(tx, priv, hashcode=SIGHASH_ALL):
-    sig = ecdsa_raw_sign(txhash(tx, hashcode), priv, True, rawmsg=True)
+def ecdsa_tx_sign(tx, priv, hashcode=SIGHASH_ALL, usenonce=None):
+    sig = ecdsa_raw_sign(txhash(tx, hashcode), priv, True, rawmsg=True, usenonce=usenonce)
     return sig+encode(hashcode, 16, 2)
 
 def ecdsa_tx_verify(tx, sig, pub, hashcode=SIGHASH_ALL):
-    #with open('dummy.txt','wb') as f:
-    #    f.write('\n'.join([pub, sig]))
     return ecdsa_raw_verify(txhash(tx, hashcode), pub, sig, True, rawmsg=True)
 
 # Scripts
@@ -304,18 +302,14 @@ def verify_tx_input(tx, i, script, sig, pub):
     return ecdsa_tx_verify(modtx, sig, pub, hashcode)
 
 
-def sign(tx, i, priv, hashcode=SIGHASH_ALL):
+def sign(tx, i, priv, hashcode=SIGHASH_ALL, usenonce=None):
     i = int(i)
     if (not is_python2 and isinstance(re, bytes)) or not re.match('^[0-9a-fA-F]*$', tx):
         return binascii.unhexlify(sign(safe_hexlify(tx), i, priv))
     pub = privkey_to_pubkey(priv, True)
-    print 'using pub: '+pub
     address = pubkey_to_address(pub)
-    print 'using address: '+address
     signing_tx = signature_form(tx, i, mk_pubkey_script(address), hashcode)
-    print 'got signing_tx: '+signing_tx
-    sig = ecdsa_tx_sign(signing_tx, priv, hashcode)
-    print 'got sig: '+ sig
+    sig = ecdsa_tx_sign(signing_tx, priv, hashcode, usenonce=usenonce)
     txobj = deserialize(tx)
     txobj["ins"][i]["script"] = serialize_script([sig, pub])
     return serialize(txobj)

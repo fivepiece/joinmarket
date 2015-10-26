@@ -94,7 +94,7 @@ def add_privkeys(priv1, priv2, usehex):
     return res
 
 @hexbin
-def ecdsa_raw_sign(msg, priv, usehex, rawpriv=True, rawmsg=False):
+def ecdsa_raw_sign(msg, priv, usehex, rawpriv=True, rawmsg=False, usenonce=None):
     '''Take the binary message msg and sign it with the private key
     priv. 
     By default priv is just a 32 byte string, if rawpriv is false
@@ -103,6 +103,10 @@ def ecdsa_raw_sign(msg, priv, usehex, rawpriv=True, rawmsg=False):
     In this case, msg must be a precalculated hash (256 bit).
     If rawmsg is False, the secp256k1 lib will hash the message as part 
     of the ECDSA-SHA256 signing algo.
+    If usenonce is not None, its value is passed to the secp256k1 library
+    sign() function as the ndata value, which is then used in conjunction
+    with a custom nonce generating function, such that the nonce used in the ECDSA
+    sign algorithm is exactly that value (ndata there, usenonce here). 32 bytes.
     Return value: the calculated signature.'''
     if rawmsg and len(msg) != 32:
         raise Exception("Invalid hash input to ECDSA raw sign.")
@@ -111,7 +115,10 @@ def ecdsa_raw_sign(msg, priv, usehex, rawpriv=True, rawmsg=False):
         newpriv = secp256k1.PrivateKey(p, raw=True)
     else:
         newpriv = secp256k1.PrivateKey(priv,raw=False)
-    sig = newpriv.ecdsa_sign(msg, raw=rawmsg)
+    if usenonce and len(usenonce) != 32:
+        raise ValueError("Invalid nonce passed to ecdsa_sign: "+str(usenonce))
+    
+    sig = newpriv.ecdsa_sign(msg, raw=rawmsg, randnonce=usenonce)
     return newpriv.ecdsa_serialize(sig)
 
 @hexbin

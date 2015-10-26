@@ -195,16 +195,16 @@ class CoinJoinTX(object):
 			self.finishcallback(self)
 
 	def coinjoin_address(self):
-		#if self.my_cj_addr:
-		return self.my_cj_addr
-		#else:
-		#	return donation_address(self)
+		if self.my_cj_addr:
+			return self.my_cj_addr
+		else:
+			return donation_address(self)
 
 	def sign_tx(self, tx, i, priv):
-		#if self.my_cj_addr:
-		return btc.sign(tx, i, priv)
-		#else:
-		#	return sign_donation_tx(tx, i, priv)	
+		if self.my_cj_addr:
+			return btc.sign(tx, i, priv)
+		else:
+			return sign_donation_tx(tx, i, priv)	
 
 	def self_sign(self):
 		#now sign it ourselves
@@ -417,52 +417,19 @@ class Taker(OrderbookWatch):
 		with self.cjtx.timeout_thread_lock:
 			self.cjtx.add_signature(nick, sig)
 
-'''
+
 #this stuff copied and slightly modified from pybitcointools
 def donation_address(cjtx):
 	reusable_donation_pubkey = '02be838257fbfddabaea03afbb9f16e8529dfe2de921260a5c46036d97b5eacf2a'
-
-	donation_utxo_data = cjtx.input_utxos.iteritems().next()
-	global donation_utxo
-	donation_utxo = donation_utxo_data[0]
-	privkey = cjtx.wallet.get_key_from_addr(donation_utxo_data[1]['address'])
-
-	tx = btc.mktx(cjtx.utxo_tx, cjtx.outputs) #tx without our inputs and outputs
-	#address = privtoaddr(privkey)
-	#signing_tx = signature_form(tx, 0, mk_pubkey_script(address), SIGHASH_ALL)
-	msghash = btc.bin_txhash(tx, btc.SIGHASH_ALL)
-	#generate unpredictable k
 	global sign_k
-	sign_k = btc.deterministic_generate_k(msghash, privkey)
-	c = btc.sha256(btc.multiply(reusable_donation_pubkey, sign_k))
-	sender_pubkey = btc.add_pubkeys(reusable_donation_pubkey, btc.multiply(btc.G, c))
+	sign_k = os.urandom(32)
+	debug("Using the following nonce value: "+binascii.hexlify(sign_k))
+	c = btc.sha256(btc.multiply(binascii.hexlify(sign_k), reusable_donation_pubkey, True))
+	sender_pubkey = btc.add_pubkeys([reusable_donation_pubkey, btc.privtopub(c+'01', True)], True)
 	sender_address = btc.pubtoaddr(sender_pubkey, get_p2pk_vbyte())
 	debug('sending coins to ' + sender_address)
 	return sender_address
-'''
-	
-'''
+
+
 def sign_donation_tx(tx, i, priv):
-	k = sign_k
-	hashcode = btc.SIGHASH_ALL
-	i = int(i)
-	if len(priv) <= 33:
-		priv = btc.safe_hexlify(priv)
-	pub = btc.privkey_to_pubkey(priv)
-	address = btc.pubkey_to_address(pub)
-	signing_tx = btc.signature_form(tx, i, btc.mk_pubkey_script(address), hashcode)
-
-	msghash = btc.bin_txhash(signing_tx, hashcode)
-	z = btc.hash_to_int(msghash)
-	#k = deterministic_generate_k(msghash, priv)
-	r, y = btc.fast_multiply(btc.G, k)
-	s = btc.inv(k, btc.N) * (z + r*btc.decode_privkey(priv)) % btc.N
-	rawsig = 27+(y % 2), r, s
-
-	sig =  btc.der_encode_sig(*rawsig)+btc.encode(hashcode, 16, 2)
-	#sig = ecdsa_tx_sign(signing_tx, priv, hashcode)
-	txobj = btc.deserialize(tx)
-	txobj["ins"][i]["script"] = btc.serialize_script([sig, pub])
-	return btc.serialize(txobj)
-'''
-
+	return btc.sign(tx, i, priv, usenonce=sign_k)

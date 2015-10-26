@@ -2,7 +2,7 @@ import os
 import hashlib
 
 from _libsecp256k1 import ffi, lib
-
+import _noncefunc
 
 FLAG_SIGN = lib.SECP256K1_CONTEXT_SIGN
 FLAG_VERIFY = lib.SECP256K1_CONTEXT_VERIFY
@@ -339,12 +339,17 @@ class PrivateKey(Base, ECDSA, Schnorr):
 
         return pubkey_ptr
 
-    def ecdsa_sign(self, msg, raw=False, digest=hashlib.sha256):
+    def ecdsa_sign(self, msg, raw=False, digest=hashlib.sha256, randnonce=None):
         msg32 = _hash32(msg, raw, digest)
         raw_sig = ffi.new('secp256k1_ecdsa_signature *')
-
+        if randnonce:            
+            nf = ffi.addressof(_noncefunc.lib, "nonce_function_rand")
+            ndata = ffi.new("char[32]",randnonce)
+        else:
+            nf = ffi.NULL
+            ndata = ffi.NULL
         signed = lib.secp256k1_ecdsa_sign(
-            self.ctx, raw_sig, msg32, self.private_key, ffi.NULL, ffi.NULL)
+            self.ctx, raw_sig, msg32, self.private_key, nf, ndata)
         assert signed == 1
 
         return raw_sig
