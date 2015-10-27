@@ -130,10 +130,65 @@ def ecdsa_sign(msg, priv):
     #Compatibility issue: old bots will be confused
     #by different msg hashing algo; need to keep electrum_sig_hash, temporarily.
     hashed_msg = electrum_sig_hash(msg)
-    return base64.b64encode(ecdsa_raw_sign(hashed_msg, priv, False, rawmsg=True))
+    dersig = ecdsa_raw_sign(hashed_msg, priv, False, rawmsg=True)
+    #see comments to legacy* functions
+    sig = legacy_ecdsa_sign_convert(dersig)
+    return base64.b64encode(sig)
 
 def ecdsa_verify(msg, sig, pub):
     #See note to ecdsa_sign
     hashed_msg = electrum_sig_hash(msg)
-    return ecdsa_raw_verify(hashed_msg, pub, base64.b64decode(sig), False,rawmsg=True)
+    sig = base64.b64decode(sig)
+    #see comments to legacy* functions
+    sig = legacy_ecdsa_verify_convert(sig)
+    if not sig:
+        return False
+    return ecdsa_raw_verify(hashed_msg, pub, sig, False,rawmsg=True)
 
+#A sadly necessary hack until all joinmarket bots are running secp256k1 code.
+#pybitcointools *message* signatures (not transaction signatures) used an old signature
+#format, basically: [27+y%2] || 32 byte r || 32 byte s,
+#instead of DER. These two functions translate the new version into the old so that 
+#counterparty bots can verify successfully.
+def legacy_ecdsa_sign_convert(dersig):
+    #note there is no sanity checking of DER format (e.g. leading length byte)
+    dersig = dersig[2:] #e.g. 3045
+    rlen = ord(dersig[1]) #ignore leading 02
+    if rlen==32:
+        r = dersig[2:34]
+        ssig = dersig[34:]
+    elif rlen==33:
+        r = dersig[3:35] #leading 00 in canonical DER stripped
+        ssig = dersig[35:]
+    else:
+        raise Exception("Incorrectly formatted DER sig:"+binascii.hexlify(dersig))
+    slen = ord(ssig[1]) #ignore leading 02
+    if slen==32:
+        s = ssig[2:34]
+    elif slen==33:
+        s = ssig[3:35] #leading 00 in canonical DER stripped
+    else:
+        raise Exception("Incorrectly formatted DER sig:"+binascii.hexlify(dersig))
+    #note: in the original pybitcointools implementation, 
+    #verification ignored the leading byte (it's only needed for pubkey recovery)
+    #so we just ignore parity here.
+    return chr(27)+r+s
+
+def legacy_ecdsa_verify_convert(sig):
+    sig = sig[1:] #ignore parity byte
+    try:
+        r, s = sig[:32],sig[32:]
+    except:
+        #signature is invalid.
+        return False
+    if not len(s)==32:
+        #signature is invalid.
+        return False
+    #canonicalize r and s
+    for x in [r,s]:
+        if ord(x[0])>127:
+            x = '\x00'+x
+    rlen = chr(len(r))
+    slen = chr(len(s))
+    total_len = 2+len(r)+2+len(s)
+    return '\x30'+chr(total_len)+'\x02'+rlen+r+'\x02'+slen+s
