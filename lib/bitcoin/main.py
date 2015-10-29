@@ -125,6 +125,9 @@ def pubkey_to_address(pubkey, magicbyte=0):
 
 pubtoaddr = pubkey_to_address
 
+def wif_compressed_privkey(priv,vbyte=0):
+    return bin_to_b58check(binascii.unhexlify(priv), 128+int(vbyte))
+
 #Note: these 2 functions require priv/pubkeys in binary not hex
 def ecdsa_sign(msg, priv):
     #Compatibility issue: old bots will be confused
