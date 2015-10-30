@@ -40,6 +40,8 @@ class TestWalletCreation(unittest.TestCase):
 	    testlog.close()
 	    #anything to check in the log? 
 	    if p.exitstatus != 0:
+		with open(testlog) as f:
+		    print f.read()
 		print 'failed due to exit status: '+str(p.exitstatus)
 		return False
 	    #check the wallet exists (and contains appropriate json?)
