@@ -38,10 +38,10 @@ class TestWalletCreation(unittest.TestCase):
 	    #time.sleep(2)
 	    p.close()
 	    testlog.close()
+	    with open(os.path.join('test','testlog-'+pwd)) as f:
+		print f.read()	    
 	    #anything to check in the log? 
 	    if p.exitstatus != 0:
-		with open(testlog) as f:
-		    print f.read()
 		print 'failed due to exit status: '+str(p.exitstatus)
 		return False
 	    #check the wallet exists (and contains appropriate json?)
