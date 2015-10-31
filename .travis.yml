@@ -32,7 +32,9 @@ script:
  - cd ..
 #set up joinmarket.cfg
  - cp test/regtest_joinmarket.cfg joinmarket.cfg
+#set up the python bindings for secp256k1
  - cd lib/bitcoin
+ - python build.py
  - python noncefunc_build.py
  - cd ../..
 #E2E encryption (libnacl) tests
@@ -45,8 +47,11 @@ script:
  - sleep 5
  - bitcoin-cli -regtest setgenerate true 101
  - cd test
+#sendpayment/yieldgen tests
  - python regtest.py
+#wallet seed and password setup tests
  - python wallet-test.py
+#TODO - possible to include tumbler-test? it takes much too long.
 branches:
  only:
   - master
