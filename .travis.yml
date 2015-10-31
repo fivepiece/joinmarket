@@ -30,6 +30,7 @@ script:
  - ./tests
  - sudo make install
  - cd ..
+ - sudo ldconfig
 #set up joinmarket.cfg
  - cp test/regtest_joinmarket.cfg joinmarket.cfg
 #set up the python bindings for secp256k1
