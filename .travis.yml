@@ -10,6 +10,7 @@ before_install:
  - sudo apt-get install -y libgmp-dev
 install:
  - pip install pexpect
+ - pip install cffi
 script:
 #libsodium installation
  - git clone git://github.com/jedisct1/libsodium.git
@@ -31,6 +32,9 @@ script:
  - cd ..
 #set up joinmarket.cfg
  - cp test/regtest_joinmarket.cfg joinmarket.cfg
+ - cd lib/bitcoin
+ - python noncefunc_build.py
+ - cd ../..
 #E2E encryption (libnacl) tests
  - python lib/enc_wrapper.py
 #start bitcoin regtest daemon and 101 blocks
