@@ -24,7 +24,7 @@ script:
  - git clone git://github.com/bitcoin/secp256k1.git
  - cd secp256k1
  - ./autogen.sh
- - .configure --enable-module-ecdh --enable-module-schnorr --enable-module-recovery
+ - ./configure --enable-module-ecdh --enable-module-schnorr --enable-module-recovery
  - make
  - ./tests
  - sudo make install
