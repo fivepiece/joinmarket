@@ -145,6 +145,7 @@ def ecdsa_verify(msg, sig, pub):
     #see comments to legacy* functions
     sig = legacy_ecdsa_verify_convert(sig)
     if not sig:
+        print 'legacy returned false'
         return False
     return ecdsa_raw_verify(hashed_msg, pub, sig, False,rawmsg=True)
 
@@ -188,9 +189,7 @@ def legacy_ecdsa_verify_convert(sig):
         #signature is invalid.
         return False
     #canonicalize r and s
-    for x in [r,s]:
-        if ord(x[0])>127:
-            x = '\x00'+x
+    r, s = ['\x00'+x if ord(x[0])>127 else x for x in [r,s]]
     rlen = chr(len(r))
     slen = chr(len(s))
     total_len = 2+len(r)+2+len(s)

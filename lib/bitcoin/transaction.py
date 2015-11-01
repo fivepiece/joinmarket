@@ -164,7 +164,7 @@ def ecdsa_tx_sign(tx, priv, hashcode=SIGHASH_ALL, usenonce=None):
     return sig+encode(hashcode, 16, 2)
 
 def ecdsa_tx_verify(tx, sig, pub, hashcode=SIGHASH_ALL):
-    return ecdsa_raw_verify(txhash(tx, hashcode), pub, sig, True, rawmsg=True)
+    return ecdsa_raw_verify(txhash(tx, hashcode), pub, sig[:-2], True, rawmsg=True)
 
 # Scripts
 

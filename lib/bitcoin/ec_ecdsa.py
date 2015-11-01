@@ -63,7 +63,7 @@ def multiply(s, pub, usehex, rawpub=True):
     ('raw' options passed in)
     '''
     newpub = secp256k1.PublicKey(pub, raw=rawpub)
-    res = newpub.multiply(s)
+    res = newpub.tweak_mul(s)
     return res.serialize()
 
 @hexbin
@@ -88,7 +88,7 @@ def add_privkeys(priv1, priv2, usehex):
         compressed = y[0]
     newpriv1, newpriv2 = (y[1], z[1])
     p1 = secp256k1.PrivateKey(newpriv1, raw=True)
-    res = p1.add_privkey(newpriv2)
+    res = p1.tweak_add(newpriv2)
     if compressed:
         res += '\x01'
     return res
