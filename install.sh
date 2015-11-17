@@ -98,7 +98,7 @@ cd ${joinmarket_home}/deps/secp256k1
 ./autogen.sh
 export C_INCLUDE_PATH=${gmp_root}/include/:${C_INCLUDE_PATH}
 export LIBRARY_PATH=${gmp_root}/lib:${LIBRARY_PATH}
-./configure --enable-module-ecdh --enable-module-schnorr --enable-module-recovery --prefix=${secp256k1_root}
+./configure --enable-module-ecdh --enable-module-schnorr --enable-module-recovery --enable-endomorphism --prefix=${secp256k1_root}
 make
 ./tests
 make install
